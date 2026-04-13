@@ -122,6 +122,7 @@ export default function StorePage() {
     setRegStoreName(regName)
     setRegStoreArea(regArea)
     // EmailJSでメール送信
+    emailjs.init('M8Uh82xbEBhX85YRa')
     emailjs.send('service_2j5ly9x', 'template_a0upj4b', {
       to_email: regEmail,
       store_name: regName,
