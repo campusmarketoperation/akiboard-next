@@ -23,13 +23,21 @@ export default function StorePage() {
   const [loginPass, setLoginPass] = useState('')
   const [loginErr, setLoginErr] = useState('')
 
-  // 登録フォーム
+  // 新規登録フォーム
   const [regName, setRegName] = useState('')
   const [regArea, setRegArea] = useState('')
   const [regEmail, setRegEmail] = useState('')
   const [regPass, setRegPass] = useState('')
   const [regPass2, setRegPass2] = useState('')
   const [regErr, setRegErr] = useState('')
+
+  // 店舗情報編集フォーム
+  const [regStoreName, setRegStoreName] = useState('')
+  const [regStoreArea, setRegStoreArea] = useState('')
+  const [regAccess, setRegAccess] = useState('')
+  const [regMapUrl, setRegMapUrl] = useState('')
+  const [photoUrl, setPhotoUrl] = useState('')
+  const [saveNotice, setSaveNotice] = useState(false)
 
   useEffect(() => {
     const saved = sessionStorage.getItem('akiboard_session')
@@ -38,6 +46,10 @@ export default function StorePage() {
       setSession(s)
       setScreen('app')
       fetchLiveStatus(s.code)
+      setRegStoreName(s.name || '')
+      setRegStoreArea(s.area || '')
+      setRegAccess(s.access || '')
+      setRegMapUrl(s.mapUrl || '')
     }
   }, [])
 
@@ -78,6 +90,10 @@ export default function StorePage() {
       const s = { code: data.code, name: data.name, area: data.area, mapUrl: data.map_url, access: data.access }
       sessionStorage.setItem('akiboard_session', JSON.stringify(s))
       setSession(s)
+      setRegStoreName(data.name || '')
+      setRegStoreArea(data.area || '')
+      setRegAccess(data.access || '')
+      setRegMapUrl(data.map_url || '')
       setScreen('app')
       fetchLiveStatus(data.code)
       setLoginErr('')
@@ -92,7 +108,7 @@ export default function StorePage() {
     if (regPass.length < 4) { setRegErr('パスワードは4文字以上にしてください'); return }
     if (regPass !== regPass2) { setRegErr('パスワードが一致しません'); return }
 
-    let code = generateCode()
+    const code = generateCode()
     const { error } = await supabase.from('stores').insert({
       code, name: regName, area: regArea, email: regEmail, password_hash: regPass, genre: 'izakaya'
     })
@@ -102,6 +118,8 @@ export default function StorePage() {
     const s = { code, name: regName, area: regArea }
     sessionStorage.setItem('akiboard_session', JSON.stringify(s))
     setSession(s)
+    setRegStoreName(regName)
+    setRegStoreArea(regArea)
     setScreen('complete')
     setRegErr('')
   }
@@ -128,6 +146,7 @@ export default function StorePage() {
       .update({ status, expires_at: expiresAt })
       .eq('id', liveStatus.id).select().single()
     if (data) setLiveStatus(data)
+    if (status === 'closed') setTimeout(() => setLiveStatus(null), 800)
   }
 
   async function extendTimer() {
@@ -145,22 +164,36 @@ export default function StorePage() {
     setLiveStatus(null)
   }
 
+  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !session) return
+    const ext = file.name.split('.').pop()
+    const path = `${session.code}/${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('store-photos').upload(path, file, { upsert: true })
+    if (!error) {
+      const { data } = supabase.storage.from('store-photos').getPublicUrl(path)
+      setPhotoUrl(data.publicUrl)
+    }
+  }
+
+  async function saveStoreInfo() {
+    if (!session) return
+    await supabase.from('stores').update({
+      name: regStoreName,
+      area: regStoreArea,
+      access: regAccess,
+      map_url: regMapUrl,
+    }).eq('code', session.code)
+    const updated = { ...session, name: regStoreName, area: regStoreArea, mapUrl: regMapUrl, access: regAccess }
+    sessionStorage.setItem('akiboard_session', JSON.stringify(updated))
+    setSession(updated)
+    setSaveNotice(true)
+    setTimeout(() => setSaveNotice(false), 3000)
+  }
+
   function changeTable(key: string, d: number) {
     setTables(prev => ({ ...prev, [key]: Math.max(0, Math.min(20, (prev as any)[key] + d)) }))
   }
-
-  function formatTables(t: any) {
-    if (!t) return ''
-    return Object.entries(t).filter(([,v]) => (v as number) > 0)
-      .map(([k,v]) => `${TABLE_LABELS[k]} ${v}${TABLE_UNITS[k]}`).join(' / ')
-  }
-
-  const btnStyle = (active: boolean) => ({
-    padding: '7px 14px', borderRadius: 20, border: '1px solid',
-    borderColor: active ? '#f97316' : 'rgba(0,0,0,0.08)',
-    background: active ? '#f97316' : '#fff', color: active ? '#fff' : '#888',
-    fontSize: 13, cursor: 'pointer'
-  })
 
   if (screen === 'login') return (
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
@@ -188,10 +221,10 @@ export default function StorePage() {
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
       <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:'32px 28px',width:'100%',maxWidth:380}}>
         <div style={{fontSize:22,fontWeight:800,color:'#f97316',textAlign:'center',marginBottom:20}}>新規登録</div>
-        {[['店舗名','text',regName,setRegName,'例：居酒屋 むらさき'],['エリア','text',regArea,setRegArea,'例：梅田'],['メールアドレス','email',regEmail,setRegEmail,'store@example.com'],['パスワード（4文字以上）','password',regPass,setRegPass,''],['パスワード（確認）','password',regPass2,setRegPass2,'']].map(([label,type,val,setter,ph]) => (
-          <div key={label as string}>
-            <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>{label as string}</label>
-            <input type={type as string} value={val as string} onChange={e=>(setter as any)(e.target.value)} placeholder={ph as string}
+        {([['店舗名','text',regName,setRegName,'例：居酒屋 むらさき'],['エリア','text',regArea,setRegArea,'例：梅田'],['メールアドレス','email',regEmail,setRegEmail,'store@example.com'],['パスワード（4文字以上）','password',regPass,setRegPass,''],['パスワード（確認）','password',regPass2,setRegPass2,'']] as [string,string,string,any,string][]).map(([label,type,val,setter,ph]) => (
+          <div key={label}>
+            <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>{label}</label>
+            <input type={type} value={val} onChange={e=>setter(e.target.value)} placeholder={ph}
               style={{width:'100%',padding:'11px 14px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,marginBottom:14,boxSizing:'border-box'}}/>
           </div>
         ))}
@@ -257,7 +290,7 @@ export default function StorePage() {
                 </div>
                 <div style={{padding:'16px 18px',display:'flex',flexDirection:'column',gap:10}}>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                    {[['open','◎ 余裕あり'],['some','○ 空きあり'],['few','△ 残りわずか'],['closed','× 本日終了']].map(([s,l]) => (
+                    {([['open','◎ 余裕あり'],['some','○ 空きあり'],['few','△ 残りわずか'],['closed','× 本日終了']] as [string,string][]).map(([s,l]) => (
                       <button key={s} onClick={()=>updateStatus(s)}
                         style={{padding:'13px 8px',borderRadius:12,border:`1.5px solid ${liveStatus.status===s?'#86efac':'rgba(0,0,0,0.08)'}`,background:liveStatus.status===s?'#f0fdf4':'#f5f4f0',fontSize:13,fontWeight:500,cursor:'pointer',color:liveStatus.status===s?'#16a34a':'#888'}}>
                         {l}
@@ -273,7 +306,7 @@ export default function StorePage() {
                 <div style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:14}}>今夜の空き状況</div>
                 <div style={{marginBottom:14}}>
                   <label style={{fontSize:12,color:'#888',display:'block',marginBottom:8}}>席の種類と卓数</label>
-                  {[['t2','2名席','卓'],['t4','4名席','卓'],['t6','6名以上','卓'],['tc','カウンター','席']].map(([k,l,u]) => (
+                  {([['t2','2名席','卓'],['t4','4名席','卓'],['t6','6名以上','卓'],['tc','カウンター','席']] as [string,string,string][]).map(([k,l,u]) => (
                     <div key={k} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
                       <span style={{fontSize:13,fontWeight:500,minWidth:90}}>{l}</span>
                       <button onClick={()=>changeTable(k,-1)} style={{width:34,height:34,borderRadius:8,border:'1px solid rgba(0,0,0,0.08)',background:'#f5f4f0',fontSize:18,cursor:'pointer'}}>−</button>
@@ -307,8 +340,36 @@ export default function StorePage() {
         )}
 
         {tab === 'register' && (
-          <div style={{fontSize:14,color:'#888',textAlign:'center',padding:40}}>
-            店舗情報の編集機能は近日公開予定です
+          <div>
+            <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:20,marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:14}}>基本情報</div>
+              {([['店舗名',regStoreName,setRegStoreName,'例：居酒屋 むらさき'],['エリア',regStoreArea,setRegStoreArea,'例：梅田'],['最寄り駅・徒歩分数',regAccess,setRegAccess,'例：梅田駅 徒歩2分'],['GoogleマップURL',regMapUrl,setRegMapUrl,'https://maps.app.goo.gl/xxxx']] as [string,string,any,string][]).map(([label,val,setter,ph]) => (
+                <div key={label} style={{marginBottom:14}}>
+                  <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>{label}</label>
+                  <input value={val} onChange={e=>setter(e.target.value)} placeholder={ph}
+                    style={{width:'100%',padding:'10px 13px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,boxSizing:'border-box'}}/>
+                </div>
+              ))}
+            </div>
+
+            <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:20,marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:14}}>宣材写真</div>
+              <input type="file" accept="image/*" onChange={handlePhotoUpload} style={{display:'none'}} id="photo-input"/>
+              <label htmlFor="photo-input" style={{display:'block',width:'100%',padding:13,background:'#f5f4f0',border:'1.5px dashed rgba(0,0,0,0.15)',borderRadius:10,textAlign:'center',fontSize:13,color:'#888',cursor:'pointer',boxSizing:'border-box'}}>
+                + 写真をアップロード
+              </label>
+              {photoUrl && (
+                <div style={{marginTop:10}}>
+                  <img src={photoUrl} style={{width:'100%',borderRadius:10,objectFit:'cover',maxHeight:200}} alt="宣材写真"/>
+                </div>
+              )}
+              <div style={{fontSize:11,color:'#888',marginTop:8}}>Instagramへの自動投稿に使用されます</div>
+            </div>
+
+            <button onClick={saveStoreInfo} style={{width:'100%',padding:14,background:'#1a1a1a',color:'#fff',border:'none',borderRadius:18,fontSize:15,fontWeight:700,cursor:'pointer'}}>
+              この内容で保存する
+            </button>
+            {saveNotice && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,padding:'12px 16px',fontSize:13,color:'#15803d',textAlign:'center',marginTop:12}}>✓ 保存しました</div>}
           </div>
         )}
       </div>
