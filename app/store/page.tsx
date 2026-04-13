@@ -1,5 +1,6 @@
 'use client'
 
+import emailjs from '@emailjs/browser'
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
@@ -120,6 +121,12 @@ export default function StorePage() {
     setSession(s)
     setRegStoreName(regName)
     setRegStoreArea(regArea)
+    // EmailJSでメール送信
+    emailjs.send('service_zfi6l4c', 'template_a0upj4b', {
+      to_email: regEmail,
+      store_name: regName,
+      store_code: code,
+    }, 'M8Uh82xbEBhX85YRa').catch(e => console.warn('メール送信エラー:', e))
     setScreen('complete')
     setRegErr('')
   }
