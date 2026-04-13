@@ -123,11 +123,11 @@ export default function StorePage() {
     setRegStoreArea(regArea)
     // EmailJSでメール送信
     emailjs.init('M8Uh82xbEBhX85YRa')
-    emailjs.send('service_2j5ly9x', 'template_a0upj4b', {
-      to_email: regEmail,
-      store_name: regName,
-      store_code: code,
-    }, 'M8Uh82xbEBhX85YRa').catch(e => console.warn('メール送信エラー:', e))
+    emailjs.send('service_zfi6l4c', 'template_a0upj4b', {
+  to_email: regEmail,
+  store_name: regName,
+  store_code: code,
+}).catch(e => console.warn('メール送信エラー:', e))
     setScreen('complete')
     setRegErr('')
   }
