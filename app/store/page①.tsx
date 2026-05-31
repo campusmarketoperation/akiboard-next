@@ -37,10 +37,8 @@ export default function StorePage() {
   const [regStoreArea, setRegStoreArea] = useState('')
   const [regAccess, setRegAccess] = useState('')
   const [regMapUrl, setRegMapUrl] = useState('')
-  const [regAddress, setRegAddress] = useState('')
   const [photoUrl, setPhotoUrl] = useState('')
   const [saveNotice, setSaveNotice] = useState(false)
-  const [geocoding, setGeocoding] = useState(false)
 
   useEffect(() => {
     const saved = sessionStorage.getItem('akiboard_session')
@@ -53,7 +51,6 @@ export default function StorePage() {
       setRegStoreArea(s.area || '')
       setRegAccess(s.access || '')
       setRegMapUrl(s.mapUrl || '')
-      setRegAddress(s.address || '')
     }
   }, [])
 
@@ -91,14 +88,13 @@ export default function StorePage() {
       .eq('code', loginCode.toUpperCase())
       .single()
     if (data && data.password_hash === loginPass) {
-      const s = { code: data.code, name: data.name, area: data.area, mapUrl: data.map_url, access: data.access, address: data.address, lat: data.lat, lng: data.lng }
+      const s = { code: data.code, name: data.name, area: data.area, mapUrl: data.map_url, access: data.access }
       sessionStorage.setItem('akiboard_session', JSON.stringify(s))
       setSession(s)
       setRegStoreName(data.name || '')
       setRegStoreArea(data.area || '')
       setRegAccess(data.access || '')
       setRegMapUrl(data.map_url || '')
-      setRegAddress(data.address || '')
       setScreen('app')
       fetchLiveStatus(data.code)
       setLoginErr('')
@@ -125,12 +121,13 @@ export default function StorePage() {
     setSession(s)
     setRegStoreName(regName)
     setRegStoreArea(regArea)
+    // EmailJSでメール送信
     emailjs.init('M8Uh82xbEBhX85YRa')
     emailjs.send('service_zfi6l4c', 'template_a0upj4b', {
-      to_email: regEmail,
-      store_name: regName,
-      store_code: code,
-    }).catch(e => console.warn('メール送信エラー:', e))
+  to_email: regEmail,
+  store_name: regName,
+  store_code: code,
+}).catch(e => console.warn('メール送信エラー:', e))
     setScreen('complete')
     setRegErr('')
   }
@@ -144,8 +141,6 @@ export default function StorePage() {
       area: session.area,
       genre: 'izakaya',
       map_url: session.mapUrl || '',
-      lat: session.lat || null,
-      lng: session.lng || null,
       tables, from_time: fromTime, to_time: toTime, memo,
       status: 'open', expires_at: expiresAt
     }).select().single()
@@ -191,37 +186,15 @@ export default function StorePage() {
 
   async function saveStoreInfo() {
     if (!session) return
-    setGeocoding(true)
-
-    let lat = session.lat || null
-    let lng = session.lng || null
-
-    if (regAddress) {
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(regAddress)}&format=json&limit=1`, {
-          headers: { 'Accept-Language': 'ja' }
-        })
-        const data = await res.json()
-        if (data.length > 0) {
-          lat = parseFloat(data[0].lat)
-          lng = parseFloat(data[0].lon)
-        }
-      } catch(e) {}
-    }
-
     await supabase.from('stores').update({
       name: regStoreName,
       area: regStoreArea,
       access: regAccess,
       map_url: regMapUrl,
-      address: regAddress,
-      lat, lng,
     }).eq('code', session.code)
-
-    const updated = { ...session, name: regStoreName, area: regStoreArea, mapUrl: regMapUrl, access: regAccess, address: regAddress, lat, lng }
+    const updated = { ...session, name: regStoreName, area: regStoreArea, mapUrl: regMapUrl, access: regAccess }
     sessionStorage.setItem('akiboard_session', JSON.stringify(updated))
     setSession(updated)
-    setGeocoding(false)
     setSaveNotice(true)
     setTimeout(() => setSaveNotice(false), 3000)
   }
@@ -385,12 +358,6 @@ export default function StorePage() {
                     style={{width:'100%',padding:'10px 13px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,boxSizing:'border-box'}}/>
                 </div>
               ))}
-              <div style={{marginBottom:0}}>
-                <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>住所（GPS表示に使用）</label>
-                <input value={regAddress} onChange={e=>setRegAddress(e.target.value)} placeholder="例：大阪府大阪市北区梅田1-1-1"
-                  style={{width:'100%',padding:'10px 13px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,boxSizing:'border-box'}}/>
-                <div style={{fontSize:11,color:'#888',marginTop:4}}>住所を入力すると保存時に自動でGPS座標を取得します</div>
-              </div>
             </div>
 
             <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:20,marginBottom:14}}>
@@ -407,8 +374,8 @@ export default function StorePage() {
               <div style={{fontSize:11,color:'#888',marginTop:8}}>Instagramへの自動投稿に使用されます</div>
             </div>
 
-            <button onClick={saveStoreInfo} disabled={geocoding} style={{width:'100%',padding:14,background:geocoding?'#ccc':'#1a1a1a',color:'#fff',border:'none',borderRadius:18,fontSize:15,fontWeight:700,cursor:geocoding?'not-allowed':'pointer'}}>
-              {geocoding ? 'GPS座標を取得中...' : 'この内容で保存する'}
+            <button onClick={saveStoreInfo} style={{width:'100%',padding:14,background:'#1a1a1a',color:'#fff',border:'none',borderRadius:18,fontSize:15,fontWeight:700,cursor:'pointer'}}>
+              この内容で保存する
             </button>
             {saveNotice && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,padding:'12px 16px',fontSize:13,color:'#15803d',textAlign:'center',marginTop:12}}>✓ 保存しました</div>}
           </div>
