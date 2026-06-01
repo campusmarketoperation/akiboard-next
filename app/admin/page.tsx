@@ -92,7 +92,7 @@ export default function AdminPage() {
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
       <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:'32px 28px',width:'100%',maxWidth:360,textAlign:'center'}}>
         <div style={{fontSize:20,fontWeight:800,color:'#f97316',marginBottom:4}}>AkiBoard</div>
-        <div style={{fontSize:12,background:'#1a1a1a',color:'#fff',display:'inline-block',padding:'2px 10px',borderRadius:20,marginBottom:24,fontSize:11,fontWeight:600}}>ADMIN</div>
+        <div style={{fontSize:11,background:'#1a1a1a',color:'#fff',display:'inline-block',padding:'2px 10px',borderRadius:20,marginBottom:24,fontWeight:600}}>ADMIN</div>
         <div>
           <label style={{fontSize:12,color:'#888',display:'block',textAlign:'left',marginBottom:6}}>管理者パスワード</label>
           <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
