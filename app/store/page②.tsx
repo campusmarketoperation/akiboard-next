@@ -91,7 +91,7 @@ export default function StorePage() {
       .eq('code', loginCode.toUpperCase())
       .single()
     if (data && data.password_hash === loginPass) {
-      const s = { code: data.code, name: data.name, area: data.area, mapUrl: data.map_url, access: data.access, address: data.address, lat: data.lat, lng: data.lng, storePhotoUrl: data.photo_url }
+      const s = { code: data.code, name: data.name, area: data.area, mapUrl: data.map_url, access: data.access, address: data.address, lat: data.lat, lng: data.lng }
       sessionStorage.setItem('akiboard_session', JSON.stringify(s))
       setSession(s)
       setRegStoreName(data.name || '')
@@ -146,7 +146,6 @@ export default function StorePage() {
       map_url: session.mapUrl || '',
       lat: session.lat || null,
       lng: session.lng || null,
-      photo_url: session.storePhotoUrl || null,
       tables, from_time: fromTime, to_time: toTime, memo,
       status: 'open', expires_at: expiresAt
     }).select().single()
@@ -187,10 +186,6 @@ export default function StorePage() {
     if (!error) {
       const { data } = supabase.storage.from('store-photos').getPublicUrl(path)
       setPhotoUrl(data.publicUrl)
-      await supabase.from('stores').update({ photo_url: data.publicUrl }).eq('code', session.code)
-      const updated = { ...session, storePhotoUrl: data.publicUrl }
-      sessionStorage.setItem('akiboard_session', JSON.stringify(updated))
-      setSession(updated)
     }
   }
 
