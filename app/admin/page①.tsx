@@ -15,7 +15,6 @@ export default function AdminPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<any>(null)
-  const [detailTarget, setDetailTarget] = useState<any>(null)
 
   useEffect(() => {
     if (sessionStorage.getItem('akiboard_admin')) {
@@ -109,40 +108,6 @@ export default function AdminPage() {
 
   return (
     <div style={{fontFamily:'sans-serif',background:'#f5f4f0',minHeight:'100vh'}}>
-      {/* 詳細モーダル */}
-      {detailTarget && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:24}} onClick={()=>setDetailTarget(null)}>
-          <div style={{background:'#fff',borderRadius:18,padding:28,width:'100%',maxWidth:420}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
-              <div style={{fontSize:16,fontWeight:700}}>{detailTarget.name}</div>
-              <button onClick={()=>setDetailTarget(null)} style={{background:'none',border:'none',fontSize:20,cursor:'pointer',color:'#888'}}>×</button>
-            </div>
-            {detailTarget.photo_url && (
-              <img src={detailTarget.photo_url} alt="宣材写真" style={{width:'100%',height:180,objectFit:'cover',borderRadius:12,marginBottom:16}}/>
-            )}
-            {[
-              ['店舗コード', detailTarget.code],
-              ['エリア', detailTarget.area],
-              ['最寄り駅', detailTarget.access || '—'],
-              ['住所', detailTarget.address || '—'],
-              ['メール', detailTarget.email || '—'],
-              ['登録日', new Date(detailTarget.created_at).toLocaleDateString('ja-JP')],
-            ].map(([label, val]) => (
-              <div key={label} style={{display:'flex',gap:12,padding:'10px 0',borderBottom:'1px solid rgba(0,0,0,0.06)'}}>
-                <div style={{fontSize:12,color:'#888',minWidth:80}}>{label}</div>
-                <div style={{fontSize:13,fontWeight:500,flex:1,wordBreak:'break-all'}}>{val}</div>
-              </div>
-            ))}
-            {detailTarget.map_url && (
-              <a href={detailTarget.map_url} target="_blank" rel="noreferrer"
-                style={{display:'block',marginTop:16,padding:'12px',background:'#f97316',color:'#fff',borderRadius:10,textAlign:'center',fontSize:13,fontWeight:700,textDecoration:'none'}}>
-                📍 Googleマップで確認
-              </a>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* 削除確認モーダル */}
       {deleteTarget && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
@@ -259,10 +224,7 @@ export default function AdminPage() {
                           }
                         </td>
                         <td style={{padding:'12px 16px'}}>
-                          <div style={{display:'flex',gap:6}}>
-                            <button onClick={()=>setDetailTarget(s)} style={{fontSize:11,color:'#3b82f6',background:'none',border:'1px solid #93c5fd',padding:'4px 10px',borderRadius:20,cursor:'pointer'}}>詳細</button>
-                            <button onClick={()=>setDeleteTarget(s)} style={{fontSize:11,color:'#ef4444',background:'none',border:'1px solid #fca5a5',padding:'4px 10px',borderRadius:20,cursor:'pointer'}}>削除</button>
-                          </div>
+                          <button onClick={()=>setDeleteTarget(s)} style={{fontSize:11,color:'#ef4444',background:'none',border:'1px solid #fca5a5',padding:'4px 10px',borderRadius:20,cursor:'pointer'}}>削除</button>
                         </td>
                       </tr>
                     )
