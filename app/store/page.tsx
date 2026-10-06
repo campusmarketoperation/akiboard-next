@@ -8,7 +8,7 @@ const TABLE_LABELS: Record<string, string> = {t2:'2名席',t4:'4名席',t6:'6名
 const TABLE_UNITS: Record<string, string> = {t2:'卓',t4:'卓',t6:'卓',tc:'席'}
 
 export default function StorePage() {
-  const [screen, setScreen] = useState<'login'|'register'|'complete'|'app'>('login')
+  const [screen, setScreen] = useState<'loading'|'login'|'register'|'verify'|'complete'|'app'>('loading')
   const [session, setSession] = useState<any>(null)
   const [liveStatus, setLiveStatus] = useState<any>(null)
   const [tables, setTables] = useState({t2:0,t4:2,t6:0,tc:0})
@@ -19,10 +19,11 @@ export default function StorePage() {
   const [tab, setTab] = useState<'publish'|'register'>('publish')
   const [timerMin, setTimerMin] = useState(60)
 
-  // ログインフォーム
-  const [loginCode, setLoginCode] = useState('')
+  // ログインフォーム（Supabase Auth：メールアドレス＋パスワード）
+  const [loginEmail, setLoginEmail] = useState('')
   const [loginPass, setLoginPass] = useState('')
   const [loginErr, setLoginErr] = useState('')
+  const [busy, setBusy] = useState(false)
 
   // 新規登録フォーム
   const [regName, setRegName] = useState('')
@@ -43,18 +44,20 @@ export default function StorePage() {
   const [geocoding, setGeocoding] = useState(false)
 
   useEffect(() => {
-    const saved = sessionStorage.getItem('akiboard_session')
-    if (saved) {
-      const s = JSON.parse(saved)
-      setSession(s)
-      setScreen('app')
-      fetchLiveStatus(s.code)
-      setRegStoreName(s.name || '')
-      setRegStoreArea(s.area || '')
-      setRegAccess(s.access || '')
-      setRegMapUrl(s.mapUrl || '')
-      setRegAddress(s.address || '')
-    }
+    // ページを開いたとき、ログイン済みなら店舗情報を読み込む
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) loadStore(data.session.user)
+      else setScreen('login')
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setLiveStatus(null)
+        setScreen('login')
+      }
+    })
+    return () => { sub.subscription.unsubscribe() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -84,55 +87,109 @@ export default function StorePage() {
     return 'AKIB-' + Math.floor(1000 + Math.random() * 9000)
   }
 
-  async function doLogin() {
-    const { data } = await supabase
-      .from('stores')
-      .select('*')
-      .eq('code', loginCode.toUpperCase())
-      .single()
-    if (data && data.password_hash === loginPass) {
-      const s = { code: data.code, name: data.name, area: data.area, mapUrl: data.map_url, access: data.access, address: data.address, lat: data.lat, lng: data.lng, storePhotoUrl: data.photo_url }
-      sessionStorage.setItem('akiboard_session', JSON.stringify(s))
-      setSession(s)
-      setRegStoreName(data.name || '')
-      setRegStoreArea(data.area || '')
-      setRegAccess(data.access || '')
-      setRegMapUrl(data.map_url || '')
-      setRegAddress(data.address || '')
-      setScreen('app')
-      fetchLiveStatus(data.code)
-      setLoginErr('')
-    } else {
-      setLoginErr('店舗コードまたはパスワードが違います')
+  function applyStore(row: any) {
+    const s = { code: row.code, name: row.name, area: row.area, mapUrl: row.map_url, access: row.access, address: row.address, lat: row.lat, lng: row.lng, storePhotoUrl: row.photo_url }
+    setSession(s)
+    setRegStoreName(row.name || '')
+    setRegStoreArea(row.area || '')
+    setRegAccess(row.access || '')
+    setRegMapUrl(row.map_url || '')
+    setRegAddress(row.address || '')
+    setPhotoUrl(row.photo_url || '')
+    fetchLiveStatus(row.code)
+  }
+
+  // ログイン中ユーザーの店舗を取得。なければ（1）旧方式の店舗を引き継ぐ、（2）新規作成する
+  async function loadStore(user: any) {
+    const { data: own } = await supabase.from('stores').select('*').eq('owner_id', user.id).maybeSingle()
+    if (own) { applyStore(own); setScreen('app'); return }
+
+    const { data: claimed } = await supabase.rpc('claim_store_by_email')
+    if (claimed && claimed.length > 0) { applyStore(claimed[0]); setScreen('app'); return }
+
+    const meta = user.user_metadata || {}
+    if (!meta.store_name) {
+      setLoginErr('店舗情報が見つかりません。新規登録からやり直してください')
+      await supabase.auth.signOut()
+      return
     }
+    for (let i = 0; i < 5; i++) {
+      const code = generateCode()
+      const { data: created, error } = await supabase.from('stores').insert({
+        code, name: meta.store_name, area: meta.area, email: user.email, genre: 'izakaya', owner_id: user.id
+      }).select().single()
+      if (!error && created) {
+        applyStore(created)
+        setIssuedCode(code)
+        emailjs.init('M8Uh82xbEBhX85YRa')
+        emailjs.send('service_zfi6l4c', 'template_a0upj4b', {
+          to_email: user.email,
+          store_name: meta.store_name,
+          store_code: code,
+        }).catch(e => console.warn('メール送信エラー:', e))
+        setScreen('complete')
+        return
+      }
+      if (error && error.code !== '23505') { // 23505 = 店舗コードの重複 → 別のコードで再試行
+        setLoginErr('店舗の作成に失敗しました: ' + error.message)
+        setScreen('login')
+        return
+      }
+    }
+    setLoginErr('店舗の作成に失敗しました。もう一度お試しください')
+    setScreen('login')
+  }
+
+  async function doLogin() {
+    setBusy(true)
+    setLoginErr('')
+    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail.trim(), password: loginPass })
+    setBusy(false)
+    if (error || !data.user) {
+      setLoginErr(error?.message?.includes('Email not confirmed')
+        ? 'メール確認がまだ完了していません。届いたメールのリンクを開いてください'
+        : 'メールアドレスまたはパスワードが違います')
+      return
+    }
+    setLoginPass('')
+    await loadStore(data.user)
   }
 
   async function doRegister() {
     if (!regName || !regArea) { setRegErr('店舗名とエリアを入力してください'); return }
     if (!regEmail.includes('@')) { setRegErr('正しいメールアドレスを入力してください'); return }
-    if (regPass.length < 4) { setRegErr('パスワードは4文字以上にしてください'); return }
+    if (regPass.length < 8) { setRegErr('パスワードは8文字以上にしてください'); return }
     if (regPass !== regPass2) { setRegErr('パスワードが一致しません'); return }
 
-    const code = generateCode()
-    const { error } = await supabase.from('stores').insert({
-      code, name: regName, area: regArea, email: regEmail, password_hash: regPass, genre: 'izakaya'
+    setBusy(true)
+    const { data, error } = await supabase.auth.signUp({
+      email: regEmail.trim(),
+      password: regPass,
+      options: {
+        data: { store_name: regName, area: regArea },
+        emailRedirectTo: `${window.location.origin}/store`,
+      },
     })
+    setBusy(false)
     if (error) { setRegErr('登録に失敗しました: ' + error.message); return }
-
-    setIssuedCode(code)
-    const s = { code, name: regName, area: regArea }
-    sessionStorage.setItem('akiboard_session', JSON.stringify(s))
-    setSession(s)
-    setRegStoreName(regName)
-    setRegStoreArea(regArea)
-    emailjs.init('M8Uh82xbEBhX85YRa')
-    emailjs.send('service_zfi6l4c', 'template_a0upj4b', {
-      to_email: regEmail,
-      store_name: regName,
-      store_code: code,
-    }).catch(e => console.warn('メール送信エラー:', e))
-    setScreen('complete')
+    setRegPass('')
+    setRegPass2('')
     setRegErr('')
+
+    if (data.session && data.user) {
+      // メール確認が不要な設定の場合はそのまま店舗を作成
+      await loadStore(data.user)
+    } else {
+      // メール確認が必要な設定の場合：確認後にログインすると店舗が作成される
+      setScreen('verify')
+    }
+  }
+
+  async function doLogout() {
+    await supabase.auth.signOut()
+    setSession(null)
+    setLiveStatus(null)
+    setScreen('login')
   }
 
   async function publish() {
@@ -188,9 +245,7 @@ export default function StorePage() {
       const { data } = supabase.storage.from('store-photos').getPublicUrl(path)
       setPhotoUrl(data.publicUrl)
       await supabase.from('stores').update({ photo_url: data.publicUrl }).eq('code', session.code)
-      const updated = { ...session, storePhotoUrl: data.publicUrl }
-      sessionStorage.setItem('akiboard_session', JSON.stringify(updated))
-      setSession(updated)
+      setSession({ ...session, storePhotoUrl: data.publicUrl })
     }
   }
 
@@ -223,9 +278,7 @@ export default function StorePage() {
       lat, lng,
     }).eq('code', session.code)
 
-    const updated = { ...session, name: regStoreName, area: regStoreArea, mapUrl: regMapUrl, access: regAccess, address: regAddress, lat, lng }
-    sessionStorage.setItem('akiboard_session', JSON.stringify(updated))
-    setSession(updated)
+    setSession({ ...session, name: regStoreName, area: regStoreArea, mapUrl: regMapUrl, access: regAccess, address: regAddress, lat, lng })
     setGeocoding(false)
     setSaveNotice(true)
     setTimeout(() => setSaveNotice(false), 3000)
@@ -235,19 +288,35 @@ export default function StorePage() {
     setTables(prev => ({ ...prev, [key]: Math.max(0, Math.min(20, (prev as any)[key] + d)) }))
   }
 
+  if (screen === 'loading') return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',color:'#888',fontSize:13}}>読み込み中...</div>
+  )
+
+  if (screen === 'verify') return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
+      <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:'32px 28px',width:'100%',maxWidth:380,textAlign:'center'}}>
+        <div style={{fontSize:40,marginBottom:12}}>📩</div>
+        <div style={{fontSize:20,fontWeight:800,color:'#f97316',marginBottom:12}}>確認メールを送信しました</div>
+        <div style={{fontSize:13,color:'#888',marginBottom:24,lineHeight:1.8}}>{regEmail} に届いたメールのリンクを開いてから、<br/>ログインしてください。ログインすると店舗コードが発行されます。</div>
+        <button onClick={()=>{setLoginEmail(regEmail);setScreen('login')}} style={{width:'100%',padding:13,background:'#f97316',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>ログイン画面へ</button>
+      </div>
+    </div>
+  )
+
   if (screen === 'login') return (
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
       <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:'32px 28px',width:'100%',maxWidth:380}}>
         <div style={{fontSize:22,fontWeight:800,color:'#f97316',textAlign:'center',marginBottom:6}}>AkiBoard</div>
         <div style={{fontSize:13,color:'#888',textAlign:'center',marginBottom:28}}>店舗管理画面</div>
-        <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>店舗コード</label>
-        <input value={loginCode} onChange={e=>setLoginCode(e.target.value)} placeholder="例：AKIB-2847"
+        <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>メールアドレス</label>
+        <input type="email" autoComplete="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} placeholder="store@example.com"
           style={{width:'100%',padding:'11px 14px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,marginBottom:14,boxSizing:'border-box'}}/>
         <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>パスワード</label>
-        <input type="password" value={loginPass} onChange={e=>setLoginPass(e.target.value)} placeholder="パスワードを入力"
+        <input type="password" autoComplete="current-password" value={loginPass} onChange={e=>setLoginPass(e.target.value)} placeholder="パスワードを入力"
           onKeyDown={e=>e.key==='Enter'&&doLogin()}
           style={{width:'100%',padding:'11px 14px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,marginBottom:14,boxSizing:'border-box'}}/>
-        <button onClick={doLogin} style={{width:'100%',padding:13,background:'#f97316',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>ログイン</button>
+        <button onClick={doLogin} disabled={busy} style={{width:'100%',padding:13,background:busy?'#ccc':'#f97316',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:busy?'not-allowed':'pointer'}}>{busy ? 'ログイン中...' : 'ログイン'}</button>
+        <div style={{fontSize:11,color:'#888',textAlign:'center',marginTop:10,lineHeight:1.7}}>以前「店舗コード＋パスワード」で登録した店舗は、<br/>同じメールアドレスで新規登録すると引き継がれます。</div>
         {loginErr && <div style={{color:'#ef4444',fontSize:12,textAlign:'center',marginTop:10}}>{loginErr}</div>}
         <div style={{textAlign:'center',marginTop:20,paddingTop:20,borderTop:'1px solid rgba(0,0,0,0.08)'}}>
           <div style={{fontSize:12,color:'#888',marginBottom:12}}>初めてご利用の方はこちら</div>
@@ -261,14 +330,14 @@ export default function StorePage() {
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
       <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:'32px 28px',width:'100%',maxWidth:380}}>
         <div style={{fontSize:22,fontWeight:800,color:'#f97316',textAlign:'center',marginBottom:20}}>新規登録</div>
-        {([['店舗名','text',regName,setRegName,'例：居酒屋 むらさき'],['エリア','text',regArea,setRegArea,'例：梅田'],['メールアドレス','email',regEmail,setRegEmail,'store@example.com'],['パスワード（4文字以上）','password',regPass,setRegPass,''],['パスワード（確認）','password',regPass2,setRegPass2,'']] as [string,string,string,any,string][]).map(([label,type,val,setter,ph]) => (
+        {([['店舗名','text',regName,setRegName,'例：居酒屋 むらさき'],['エリア','text',regArea,setRegArea,'例：梅田'],['メールアドレス','email',regEmail,setRegEmail,'store@example.com'],['パスワード（8文字以上）','password',regPass,setRegPass,''],['パスワード（確認）','password',regPass2,setRegPass2,'']] as [string,string,string,any,string][]).map(([label,type,val,setter,ph]) => (
           <div key={label}>
             <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>{label}</label>
             <input type={type} value={val} onChange={e=>setter(e.target.value)} placeholder={ph}
               style={{width:'100%',padding:'11px 14px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,marginBottom:14,boxSizing:'border-box'}}/>
           </div>
         ))}
-        <button onClick={doRegister} style={{width:'100%',padding:13,background:'#f97316',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>登録して店舗コードを取得する</button>
+        <button onClick={doRegister} disabled={busy} style={{width:'100%',padding:13,background:busy?'#ccc':'#f97316',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:busy?'not-allowed':'pointer'}}>{busy ? '登録中...' : '登録して店舗コードを取得する'}</button>
         {regErr && <div style={{color:'#ef4444',fontSize:12,textAlign:'center',marginTop:10}}>{regErr}</div>}
         <div style={{textAlign:'center',marginTop:16}}>
           <button onClick={()=>setScreen('login')} style={{background:'none',border:'none',color:'#888',fontSize:13,cursor:'pointer'}}>← ログインに戻る</button>
@@ -287,7 +356,7 @@ export default function StorePage() {
           <div style={{fontSize:12,color:'#f97316',marginBottom:6}}>店舗コード</div>
           <div style={{fontSize:28,fontWeight:800,color:'#f97316',letterSpacing:'0.1em'}}>{issuedCode}</div>
         </div>
-        <div style={{fontSize:12,color:'#888',marginBottom:24,lineHeight:1.8}}>このコードは次回ログイン時に必要です。<br/>大切に保管してください。</div>
+        <div style={{fontSize:12,color:'#888',marginBottom:24,lineHeight:1.8}}>次回からはメールアドレスとパスワードでログインできます。<br/>店舗コードはお問い合わせ時にお使いください。</div>
         <button onClick={()=>setScreen('app')} style={{width:'100%',padding:14,background:'#f97316',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>管理画面に進む →</button>
       </div>
     </div>
@@ -303,7 +372,7 @@ export default function StorePage() {
           </div>
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
             <a href="/" style={{fontSize:12,color:'#f97316',border:'1px solid #f97316',padding:'5px 12px',borderRadius:20,textDecoration:'none'}}>お客さん画面 →</a>
-            <button onClick={()=>{sessionStorage.removeItem('akiboard_session');setScreen('login')}} style={{fontSize:12,color:'#888',background:'none',border:'none',cursor:'pointer'}}>ログアウト</button>
+            <button onClick={doLogout} style={{fontSize:12,color:'#888',background:'none',border:'none',cursor:'pointer'}}>ログアウト</button>
           </div>
         </div>
       </header>
