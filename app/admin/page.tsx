@@ -3,12 +3,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
-const ADMIN_PASS = 'axia2026admin'
-
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false)
+  const [checking, setChecking] = useState(true)
+  const [email, setEmail] = useState('')
   const [pass, setPass] = useState('')
-  const [passErr, setPassErr] = useState(false)
+  const [passErr, setPassErr] = useState('')
 
   const [stores, setStores] = useState<any[]>([])
   const [liveList, setLiveList] = useState<any[]>([])
@@ -17,11 +17,22 @@ export default function AdminPage() {
   const [deleteTarget, setDeleteTarget] = useState<any>(null)
   const [detailTarget, setDetailTarget] = useState<any>(null)
 
+  // 管理者かどうかは admins テーブル（RLSで本人の行だけ読める）で判定。
+  // 画面の表示切り替えだけでなく、データの読み書き自体も RLS の is_admin() で守られている。
+  async function checkAdmin(userId: string) {
+    const { data } = await supabase.from('admins').select('user_id').eq('user_id', userId).maybeSingle()
+    return !!data
+  }
+
   useEffect(() => {
-    if (sessionStorage.getItem('akiboard_admin')) {
-      setAuthed(true)
-      fetchAll()
-    }
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session && await checkAdmin(data.session.user.id)) {
+        setAuthed(true)
+        fetchAll()
+      }
+      setChecking(false)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -62,20 +73,25 @@ export default function AdminPage() {
     fetchAll()
   }
 
-  function doLogin() {
-    if (pass === ADMIN_PASS) {
-      sessionStorage.setItem('akiboard_admin', '1')
-      setAuthed(true)
-      fetchAll()
-    } else {
-      setPassErr(true)
-      setPass('')
+  async function doLogin() {
+    setPassErr('')
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pass })
+    setPass('')
+    if (error || !data.user) { setPassErr('メールアドレスまたはパスワードが違います'); return }
+    if (!(await checkAdmin(data.user.id))) {
+      await supabase.auth.signOut()
+      setPassErr('管理者権限がありません')
+      return
     }
+    setAuthed(true)
+    fetchAll()
   }
 
-  function doLogout() {
-    sessionStorage.removeItem('akiboard_admin')
+  async function doLogout() {
+    await supabase.auth.signOut()
     setAuthed(false)
+    setStores([])
+    setLiveList([])
   }
 
   const filtered = stores.filter(s =>
@@ -89,19 +105,26 @@ export default function AdminPage() {
     return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 60000))
   }
 
+  if (checking) return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',color:'#888',fontSize:13}}>読み込み中...</div>
+  )
+
   if (!authed) return (
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#f5f4f0',padding:24}}>
       <div style={{background:'#fff',borderRadius:18,border:'1px solid rgba(0,0,0,0.08)',padding:'32px 28px',width:'100%',maxWidth:360,textAlign:'center'}}>
         <div style={{fontSize:20,fontWeight:800,color:'#f97316',marginBottom:4}}>AkiBoard</div>
         <div style={{fontSize:11,background:'#1a1a1a',color:'#fff',display:'inline-block',padding:'2px 10px',borderRadius:20,marginBottom:24,fontWeight:600}}>ADMIN</div>
         <div>
-          <label style={{fontSize:12,color:'#888',display:'block',textAlign:'left',marginBottom:6}}>管理者パスワード</label>
-          <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
+          <label style={{fontSize:12,color:'#888',display:'block',textAlign:'left',marginBottom:6}}>管理者メールアドレス</label>
+          <input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)}
+            style={{width:'100%',padding:'11px 14px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,marginBottom:14,boxSizing:'border-box'}}/>
+          <label style={{fontSize:12,color:'#888',display:'block',textAlign:'left',marginBottom:6}}>パスワード</label>
+          <input type="password" autoComplete="current-password" value={pass} onChange={e=>setPass(e.target.value)}
             onKeyDown={e=>e.key==='Enter'&&doLogin()}
             placeholder="パスワードを入力"
             style={{width:'100%',padding:'11px 14px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,marginBottom:14,boxSizing:'border-box'}}/>
           <button onClick={doLogin} style={{width:'100%',padding:13,background:'#1a1a1a',color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>ログイン</button>
-          {passErr && <div style={{color:'#ef4444',fontSize:12,marginTop:10}}>パスワードが違います</div>}
+          {passErr && <div style={{color:'#ef4444',fontSize:12,marginTop:10}}>{passErr}</div>}
         </div>
       </div>
     </div>
