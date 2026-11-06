@@ -36,28 +36,43 @@ export default function Home() {
   const [sortByDistance, setSortByDistance] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
+
+    async function fetchStores() {
+      const now = new Date().toISOString()
+      const { data } = await supabase
+        .from('live_statuses')
+        .select('*')
+        .gt('expires_at', now)
+        .neq('status', 'closed')
+        .order('created_at', { ascending: false })
+      if (cancelled) return
+      if (data) {
+        setStores(data)
+        setAreas([...new Set(data.map((s: any) => s.area))])
+      }
+      setLoading(false)
+    }
+
     fetchStores()
     const channel = supabase
       .channel('live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'live_statuses' }, () => fetchStores())
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [])
 
-  async function fetchStores() {
-    const now = new Date().toISOString()
-    const { data } = await supabase
-      .from('live_statuses')
-      .select('*')
-      .gt('expires_at', now)
-      .neq('status', 'closed')
-      .order('created_at', { ascending: false })
-    if (data) {
-      setStores(data)
-      setAreas([...new Set(data.map((s: any) => s.area))])
+    // 公開期限切れはDBの変更イベントが来ないため、定期的に取り直して表示から外す
+    const timer = setInterval(fetchStores, 60 * 1000)
+    // スマホでタブに戻ったとき（リアルタイム接続が切れていることがある）にも最新化する
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchStores() }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      supabase.removeChannel(channel)
     }
-    setLoading(false)
-  }
+  }, [])
 
   function getLocation() {
     if (!navigator.geolocation) { setGpsStatus('denied'); return }
