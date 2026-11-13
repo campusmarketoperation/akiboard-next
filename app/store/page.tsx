@@ -78,6 +78,8 @@ export default function StorePage() {
       .select('*')
       .eq('store_code', code)
       .gt('expires_at', now)
+      // 「本日終了」「公開を取り消す」で閉じた掲載は、再読み込み後に「公開中」として復活させない
+      .neq('status', 'closed')
       .order('created_at', { ascending: false })
       .limit(1)
     setLiveStatus(data && data.length > 0 ? data[0] : null)
