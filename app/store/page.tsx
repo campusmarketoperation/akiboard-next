@@ -6,6 +6,8 @@ import { supabase } from '../../lib/supabase'
 
 const TABLE_LABELS: Record<string, string> = {t2:'2名席',t4:'4名席',t6:'6名以上',tc:'カウンター'}
 const TABLE_UNITS: Record<string, string> = {t2:'卓',t4:'卓',t6:'卓',tc:'席'}
+// お客さん画面（app/page.tsx）のジャンル絞り込みと同じキー
+const GENRES: [string, string][] = [['izakaya','🍺 居酒屋'],['bar','🥂 バー'],['ramen','🍜 ラーメン'],['cafe','☕ カフェ'],['restaurant','🍽 レストラン'],['other','🍴 その他']]
 
 export default function StorePage() {
   const [screen, setScreen] = useState<'loading'|'login'|'register'|'verify'|'complete'|'app'>('loading')
@@ -36,6 +38,7 @@ export default function StorePage() {
   // 店舗情報編集フォーム
   const [regStoreName, setRegStoreName] = useState('')
   const [regStoreArea, setRegStoreArea] = useState('')
+  const [regGenre, setRegGenre] = useState('izakaya')
   const [regAccess, setRegAccess] = useState('')
   const [regMapUrl, setRegMapUrl] = useState('')
   const [regAddress, setRegAddress] = useState('')
@@ -88,10 +91,11 @@ export default function StorePage() {
   }
 
   function applyStore(row: any) {
-    const s = { code: row.code, name: row.name, area: row.area, mapUrl: row.map_url, access: row.access, address: row.address, lat: row.lat, lng: row.lng, storePhotoUrl: row.photo_url }
+    const s = { code: row.code, name: row.name, area: row.area, genre: row.genre || 'izakaya', mapUrl: row.map_url, access: row.access, address: row.address, lat: row.lat, lng: row.lng, storePhotoUrl: row.photo_url }
     setSession(s)
     setRegStoreName(row.name || '')
     setRegStoreArea(row.area || '')
+    setRegGenre(row.genre || 'izakaya')
     setRegAccess(row.access || '')
     setRegMapUrl(row.map_url || '')
     setRegAddress(row.address || '')
@@ -199,7 +203,7 @@ export default function StorePage() {
       store_code: session.code,
       store_name: session.name,
       area: session.area,
-      genre: 'izakaya',
+      genre: session.genre || 'izakaya',
       map_url: session.mapUrl || '',
       lat: session.lat || null,
       lng: session.lng || null,
@@ -272,13 +276,14 @@ export default function StorePage() {
     await supabase.from('stores').update({
       name: regStoreName,
       area: regStoreArea,
+      genre: regGenre,
       access: regAccess,
       map_url: regMapUrl,
       address: regAddress,
       lat, lng,
     }).eq('code', session.code)
 
-    setSession({ ...session, name: regStoreName, area: regStoreArea, mapUrl: regMapUrl, access: regAccess, address: regAddress, lat, lng })
+    setSession({ ...session, name: regStoreName, area: regStoreArea, genre: regGenre, mapUrl: regMapUrl, access: regAccess, address: regAddress, lat, lng })
     setGeocoding(false)
     setSaveNotice(true)
     setTimeout(() => setSaveNotice(false), 3000)
@@ -459,6 +464,13 @@ export default function StorePage() {
                     style={{width:'100%',padding:'10px 13px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,boxSizing:'border-box'}}/>
                 </div>
               ))}
+              <div style={{marginBottom:14}}>
+                <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>ジャンル（お客さん画面の絞り込みに使用）</label>
+                <select value={regGenre} onChange={e=>setRegGenre(e.target.value)}
+                  style={{width:'100%',padding:'10px 13px',border:'1px solid rgba(0,0,0,0.08)',borderRadius:10,fontSize:14,boxSizing:'border-box',background:'#fff'}}>
+                  {GENRES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
               <div style={{marginBottom:0}}>
                 <label style={{fontSize:12,color:'#888',display:'block',marginBottom:6}}>住所（GPS表示に使用）</label>
                 <input value={regAddress} onChange={e=>setRegAddress(e.target.value)} placeholder="例：大阪府大阪市北区梅田1-1-1"
